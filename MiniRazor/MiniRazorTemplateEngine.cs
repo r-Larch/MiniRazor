@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -34,6 +34,11 @@ namespace MiniRazor
         /// Root namespace, in which the compiled templates are located.
         /// </summary>
         public string RootNamespace { get; }
+
+        /// <summary>
+        /// Extensions to customize compilation
+        /// </summary>
+        public ICollection<IMiniRazorExtension> Extensions { get; set; } = new List<IMiniRazorExtension>();
 
         /// <summary>
         /// Initializes an instance of <see cref="MiniRazorTemplateEngine"/>.
@@ -84,20 +89,27 @@ namespace MiniRazor
         {
             const string templateTypeName = "MiniRazorTemplate";
 
+            var extensionContext = new ExtensionContext(_metadataReferencesLazy.Value);
+
             var engine = RazorProjectEngine.Create(
                 RazorConfiguration.Default,
                 EmptyRazorProjectFileSystem.Instance,
-                b => b
-                    .SetNamespace(RootNamespace)
-                    .SetBaseType(typeof(MiniRazorTemplateBase).FullName)
-                    .ConfigureClass((s, c) =>
-                    {
-                        // Internal instead of public so we can use internal types inside
-                        c.Modifiers.Remove("public");
-                        c.Modifiers.Add("internal");
+                builder => {
+                    builder
+                        .SetNamespace(RootNamespace)
+                        .SetBaseType(typeof(MiniRazorTemplateBase).FullName)
+                        .ConfigureClass((s, c) => {
+                            // Internal instead of public so we can use internal types inside
+                            c.Modifiers.Remove("public");
+                            c.Modifiers.Add("internal");
 
-                        c.ClassName = templateTypeName;
-                    })
+                            c.ClassName = templateTypeName;
+                        });
+
+                    foreach (var extension in Extensions) {
+                        extension.Configure(builder, extensionContext);
+                    }
+                }
             );
 
             var sourceDocument = RazorSourceDocument.Create(
@@ -108,8 +120,8 @@ namespace MiniRazor
             var codeDocument = engine.Process(
                 sourceDocument,
                 null,
-                Array.Empty<RazorSourceDocument>(),
-                Array.Empty<TagHelperDescriptor>()
+                extensionContext.ImportSources.ToArray(),
+                extensionContext.TagHelperDescriptors.ToArray()
             );
 
             var csharpDocument = codeDocument.GetCSharpDocument();
@@ -117,7 +129,7 @@ namespace MiniRazor
             var csharpDocumentCompilation = CSharpCompilation.Create(
                 TemplateAssemblyName,
                 new[] {csharpDocumentAst},
-                _metadataReferencesLazy.Value,
+                extensionContext.MetadataReferences,
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
             );
 
@@ -133,7 +145,7 @@ namespace MiniRazor
                 assembly.GetTypes().SingleOrDefault(t => t.Name.Equals(templateTypeName, StringComparison.Ordinal)) ??
                 throw new InvalidOperationException("Could not locate compiled template in the generated assembly.");
 
-            return new MiniRazorTemplateDescriptor(templateType);
+            return new MiniRazorTemplateDescriptor(templateType, Extensions);
         }
     }
 }

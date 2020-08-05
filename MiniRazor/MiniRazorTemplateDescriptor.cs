@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using MiniRazor.Internal.Extensions;
 
@@ -10,16 +11,27 @@ namespace MiniRazor
     public class MiniRazorTemplateDescriptor
     {
         private readonly Type _templateType;
+        private readonly ICollection<IMiniRazorExtension> _extensions;
 
         /// <summary>
         /// Initializes an instance of <see cref="MiniRazorTemplateDescriptor"/>.
         /// </summary>
-        public MiniRazorTemplateDescriptor(Type templateType) =>
+        public MiniRazorTemplateDescriptor(Type templateType, ICollection<IMiniRazorExtension> extensions)
+        {
             _templateType = templateType;
+            _extensions = extensions;
+        }
 
-        private IMiniRazorTemplate ActivateTemplate() => (IMiniRazorTemplate)
-            (Activator.CreateInstance(_templateType) ??
-             throw new InvalidOperationException($"Could not instantiate template of type '{_templateType}'."));
+        private IMiniRazorTemplate ActivateTemplate()
+        {
+            var template = (IMiniRazorTemplate) (Activator.CreateInstance(_templateType) ?? throw new InvalidOperationException($"Could not instantiate template of type '{_templateType}'."));
+
+            foreach (var extension in _extensions) {
+                extension.ActivateTemplate(template);
+            }
+
+            return template;
+        }
 
         /// <summary>
         /// Renders the template with the specified model.
